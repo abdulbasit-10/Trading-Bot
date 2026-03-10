@@ -1,0 +1,34 @@
+{
+  "stats": {
+    "total_applicants": 1,
+    "successful": 1,
+    "failed": 0
+  },
+  "details": [
+    {
+      "applicant": {
+        "email": "yicela3606@hutudns.com",
+        "password": "3606@hutuDNS",
+        "passport_number": "AA1500770",
+        "first_name": "LENOVA",
+        "last_name": "LAPTOP",
+        "date_of_birth": "2000/03/31",
+        "nationality": "Pakistani",
+        "phone": "923179765800",
+        "visa_type": "study",
+        "center": "Lahore",
+        "travel_date": "20/03/2026",
+        "duration": "20",
+        "purpose": "study",
+        "location": "Lahore",
+        "visa_type_option": "Family of EEA/EU citizens",
+        "visa_sub_type_option": "Family of EEA/EU citizens",
+        "appointment_for": "Individual",
+        "members_count": "",
+        "category": "Normal"
+      },
+      "success": true,
+      "timestamp": "2026-03-10 10:21:30"
+    }
+  ]
+}

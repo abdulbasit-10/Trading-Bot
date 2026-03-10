@@ -1,0 +1,29 @@
+{
+  "stats": {
+    "total_applicants": 1,
+    "processed": 1,
+    "successful": 1,
+    "failed": 0
+  },
+  "results": [
+    {
+      "applicant": {
+        "email": "rahidafridi491491@gmail.com",
+        "password": "wnRc8QXHEc9p*w",
+        "passport_number": "AA1533663",
+        "first_name": "RAHID",
+        "last_name": "AFRIDI",
+        "date_of_birth": "15/01/1990",
+        "nationality": "Pakistani",
+        "phone": "+923001234567",
+        "visa_type": "tourist",
+        "center": "islamabad",
+        "travel_date": "15/03/2024",
+        "duration": "15",
+        "purpose": "Tourism"
+      },
+      "success": true,
+      "timestamp": "2026-02-27 05:34:43"
+    }
+  ]
+}

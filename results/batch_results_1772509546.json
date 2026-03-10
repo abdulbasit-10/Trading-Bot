@@ -1,0 +1,60 @@
+{
+  "stats": {
+    "total_applicants": 2,
+    "processed": 2,
+    "successful": 0,
+    "failed": 2
+  },
+  "results": [
+    {
+      "applicant": {
+        "email": "yicela3606@hutudns.com",
+        "password": "3606@hutuDNS",
+        "passport_number": "AA1500770",
+        "first_name": "LENOVA",
+        "last_name": "LAPTOP",
+        "date_of_birth": "2000/03/31",
+        "nationality": "Pakistani",
+        "phone": "923179765800",
+        "visa_type": "study",
+        "center": "Lahore",
+        "travel_date": "20/03/2026",
+        "duration": "20",
+        "purpose": "study",
+        "location": "Lahore",
+        "visa_type_option": "Schengen Visa/ Short Term Visa",
+        "visa_sub_type_option": "study Visa",
+        "appointment_for": "Individual",
+        "members_count": "",
+        "category": "Normal"
+      },
+      "success": false,
+      "timestamp": "2026-03-03 08:45:46"
+    },
+    {
+      "applicant": {
+        "email": "rahidafridi491491@gmail.com",
+        "password": "wnRc8QXHEc9p*w",
+        "passport_number": "AA1533663",
+        "first_name": "RAHID",
+        "last_name": "AFRIDI",
+        "date_of_birth": "15/01/1990",
+        "nationality": "Pakistani",
+        "phone": "923001234567",
+        "visa_type": "tourist",
+        "center": "islamabad",
+        "travel_date": "15/03/2026",
+        "duration": "15",
+        "purpose": "Tourism",
+        "location": "Lahore",
+        "visa_type_option": "Schengen Visa/ Short Term Visa",
+        "visa_sub_type_option": "Tourist Visa",
+        "appointment_for": "Individual",
+        "members_count": "2 Members",
+        "category": "Normal"
+      },
+      "success": false,
+      "timestamp": "2026-03-03 08:45:46"
+    }
+  ]
+}

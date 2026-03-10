@@ -1,0 +1,25 @@
+# Core dependencies
+playwright
+pillow
+numpy
+
+# OCR
+rapidocr-onnxruntime
+
+# Image processing
+opencv-python
+
+# AI/LLM (optional)
+browser-use
+langchain-google-genai
+pydantic
+
+# Utilities
+python-dotenv
+requests
+typing-extensions
+
+# Fix urllib3 compatibility
+urllib3
+chardet
+charset-normalizer
