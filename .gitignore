@@ -15,3 +15,13 @@ screenshots/
 .env 
 results/
 html/
+logs/
+applicants.csv
+*.log
+*.tmp
+*.temp
+test.py
+test_captcha_extraction.py
+verify_ocr.py
+second captcha.txt
+file.py
