@@ -28,8 +28,10 @@ from src.config import Config
 from src.models.captcha_solver import CaptchaSolver
 from src.models.field_detector import FieldDetector
 from src.models.applicant import Applicant
+from src.services.email_service import EmailService
 from utils.logger import get_logger, setup_logging
 from utils.helpers import save_screenshot, save_result
+from src.pages.appointment_page import handle_appointment_booking, wait_for_appointment_page
 
 logger = get_logger(__name__)
 
@@ -141,20 +143,28 @@ class SpainVisaAutomator:
                     if not self._is_index_page(page) and not self._has_book_new_appointment_link(page):
                         raise RuntimeError("Failed to reach index page after captcha")
 
-                    # ── Step 7: open Book New Appointment ─────────────────
-                    if not self._navigate_to_new_appointment(page):
-                        raise RuntimeError("Failed to open Book New Appointment")
+                    # ── Step 7: ensure we're on Book New Appointment ──────
+                    # Skip navigation when already there; avoid redundant logs.
+                    if not self._ensure_book_new_appointment_page(page):
+                        logger.warning(
+                            "Proceeding without confirmed 'Book New Appointment' navigation; "
+                            "downstream checks will validate the current page."
+                        )
 
-                    # ── Step 8: captcha on new-appointment page ───────────
+                    # ── Step 8: captcha on new-appointment page (if any) ───
                     if not self._handle_new_appointment_captcha(page):
                         raise RuntimeError("New-appointment captcha failed")
 
                     # ── Step 9: visa-type form ────────────────────────────
-                    if not self._handle_visa_type_page(page, applicant):
+                    visa_ok = self._handle_visa_type_page(page, applicant)
+                    # In some cases the visa-type handler returns False even
+                    # though the site has already navigated to the slots page.
+                    # Before aborting, explicitly wait for the appointment page.
+                    if not visa_ok and not wait_for_appointment_page(page):
                         raise RuntimeError("Visa-type form handling failed")
 
-                    # ── Step 10: booking ──────────────────────────────────
-                    if not self._handle_appointment_booking(page, applicant):
+                    # ── Step 10: booking (Slots + OTP + Verification) ─────
+                    if not handle_appointment_booking(page, applicant):
                         raise RuntimeError("Appointment booking flow failed")
 
                     return True
@@ -201,29 +211,22 @@ class SpainVisaAutomator:
         urls = [
             Config.LOGIN_URL,
             "https://appointment.thespainvisa.com/Global/account/login",
-            "https://appointment.thespainvisa.com/Global/Account/Login",
             "https://appointment.thespainvisa.com/",
-            "http://appointment.thespainvisa.com/Global/account/login",
         ]
 
         for url in urls:
             try:
-                logger.debug(f"Trying: {url}")
-                page.goto(url, wait_until="commit", timeout=8000)
-                time.sleep(0.05)
-
-                try:
-                    page.wait_for_load_state("domcontentloaded", timeout=3000)
-                except Exception:
-                    pass
+                page.goto(url, wait_until="domcontentloaded", timeout=15000)
+                
+                # Check if we are already logged in or on the login page
+                if self._is_logged_in(page):
+                    logger.info("✅ Already logged in")
+                    return True
 
                 lower_url = (page.url or "").lower()
-                lower_title = (page.title() or "").lower()
-
                 if (
                     "login" in lower_url
                     or "account" in lower_url
-                    or "login" in lower_title
                     or self._is_captcha_visible(page)
                     or page.locator('input[type="email"]:visible').count() > 0
                     or page.locator('input[type="password"]:visible').count() > 0
@@ -232,98 +235,56 @@ class SpainVisaAutomator:
                     return True
 
             except Exception as exc:
-                logger.warning(f"Failed to load {url}: {exc}")
-
-        # Last-resort: homepage → find Login link
-        try:
-            page.goto(
-                "https://appointment.thespainvisa.com/",
-                wait_until="commit",
-                timeout=8000,
-            )
-            time.sleep(0.05)
-            login_links = page.locator('a:has-text("Login")').all()
-            if login_links:
-                try:
-                    with page.expect_navigation(wait_until="domcontentloaded", timeout=8000):
-                        login_links[0].click()
-                except Exception:
-                    login_links[0].click()
-                try:
-                    page.wait_for_load_state("domcontentloaded", timeout=3000)
-                except Exception:
-                    pass
-                lower = (page.url or "").lower()
-                if (
-                    self._is_captcha_visible(page)
-                    or page.locator('input[type="email"]:visible').count() > 0
-                    or "login" in lower
-                ):
-                    return True
-        except Exception:
-            pass
+                logger.warning(f"Failed to load {url}")
 
         logger.error("❌ Could not load any login page")
         return False
 
     def _navigate_to_new_appointment(self, page: Page) -> bool:
         """Navigate to the Book New Appointment page after login."""
-        logger.info("🧭 Navigating to Book New Appointment…")
-
+        
         target = re.compile(r"/global/appointment/newappointment", re.IGNORECASE)
-
         if target.search(page.url or ""):
             logger.info("✅ Already on Book New Appointment page")
             return True
+            
+        logger.info("🧭 Navigating to Book New Appointment…")
 
-        selectors = [
-            'div.tns-item.tns-slide-active a[href*="/Global/appointment/newappointment"]:has-text("Book Now")',
-            'a[href*="/Global/appointment/newappointment"]:has-text("Book Now")',
-            'a[href*="/Global/appointment/newappointment"]:has-text("Book New Appointment")',
-            'a:has-text("Book New Appointment")',
-            'a:has-text("Book Now")',
-        ]
-
-        deadline = time.time() + 4
-        while time.time() < deadline:
-            for selector in selectors:
-                try:
-                    links = page.locator(selector)
-                    for i in range(min(links.count(), 5)):
-                        link = links.nth(i)
-                        if not link.is_visible():
-                            continue
-                        href = (link.get_attribute("href") or "").strip()
-                        if href and not target.search(href):
-                            continue
-                        try:
-                            link.click(timeout=800)
-                        except Exception:
-                            continue
-                        try:
-                            page.wait_for_load_state("domcontentloaded", timeout=900)
-                        except Exception:
-                            pass
-                        if target.search(page.url or ""):
-                            logger.info("✅ Opened Book New Appointment page")
-                            save_screenshot(page, "book_new_appointment_opened")
-                            return True
-                except Exception as exc:
-                    logger.debug(f"Selector {selector} failed: {exc}")
-            time.sleep(0.03)
-
-        # Direct URL fallback
+        # Try direct navigation first as it's fastest
         try:
             page.goto(
                 "https://appointment.thespainvisa.com/Global/appointment/newappointment",
                 wait_until="domcontentloaded",
-                timeout=4000,
+                timeout=10000,
             )
             if target.search(page.url or ""):
                 logger.info("✅ Opened via direct URL")
                 return True
         except Exception:
             pass
+
+        # Fallback to clicking links
+        selectors = [
+            'a[href*="/Global/appointment/newappointment"]:has-text("Book Now")',
+            'a[href*="/Global/appointment/newappointment"]:has-text("Book New Appointment")',
+            'a:has-text("Book New Appointment")',
+            'a:has-text("Book Now")',
+        ]
+
+        for selector in selectors:
+            try:
+                links = page.locator(selector)
+                if links.count() > 0 and links.first.is_visible():
+                    links.first.click(timeout=3000)
+                    try:
+                        page.wait_for_load_state("domcontentloaded", timeout=5000)
+                    except Exception:
+                        pass
+                    if target.search(page.url or ""):
+                        logger.info("✅ Opened Book New Appointment page")
+                        return True
+            except Exception:
+                continue
 
         logger.warning("⚠️ Could not reach Book New Appointment page")
         return False
@@ -397,14 +358,13 @@ class SpainVisaAutomator:
 
                 current_url = (page.url or "").lower()
                 if self._is_password_captcha_page(page) and self._is_captcha_visible(page):
-                    logger.warning("Captcha still visible after submit")
+                    # We might just need to refresh and try again
+                    pass
                 elif "captcha" in current_url:
-                    logger.warning(f"Still on captcha URL after submit: {current_url}")
+                    pass
                 else:
                     self.captcha_solver.stats["ocr_success"] += 1
                     return True
-            else:
-                logger.warning("Captcha solver returned False")
 
             if self._is_password_captcha_page(page) or self._is_captcha_visible(page):
                 self._refresh_captcha(page)
@@ -435,33 +395,23 @@ class SpainVisaAutomator:
 
     def _handle_new_appointment_captcha(self, page: Page) -> bool:
         """Solve the captcha on the Book New Appointment page (no password)."""
-        logger.info("🔐 Handling Book New Appointment captcha…")
-        if self._is_go_home_page(page) or self._is_index_page(page):
-            if not self._restart_new_appointment_flow(page):
-                return False
-
-        if not self._is_captcha_visible(page):
-            try:
-                page.wait_for_function(
-                    """
-                    () => {
-                        const img = document.querySelector('.captcha-img');
-                        if (!img) return false;
-                        const s = window.getComputedStyle(img);
-                        if (s.display === 'none' || s.visibility === 'hidden') return false;
-                        return true;
-                    }
-                    """,
-                    timeout=2000,
-                )
-            except Exception:
-                pass
+        url = (page.url or "").lower()
+        # If already past captcha (visa form or slots page visible), proceed
+        if "appointment/newappointment" in url:
+            if self._is_visa_type_form_visible(page):
+                logger.info("✅ Visa Type form visible — skipping captcha")
+                return True
+            slot_label = page.locator('label.form-label:has-text("Appointment Date")').first
+            if slot_label.count() > 0 and slot_label.is_visible():
+                logger.info("✅ Slots page visible — skipping captcha")
+                return True
 
         if not self._is_captcha_visible(page):
             if self._is_post_captcha_destination(page):
                 logger.info("✅ No captcha on new-appointment page — already past it")
                 return True
-            return False
+
+        logger.info("🔐 Handling Book New Appointment captcha…")
 
         try:
             solved = self.captcha_solver.solve_captcha(
@@ -472,14 +422,20 @@ class SpainVisaAutomator:
             return False
 
         if not solved:
+            # Captcha solver failed — check if we can proceed anyway
+            if self._is_visa_type_form_visible(page):
+                logger.info("✅ Visa Type form visible after captcha attempt — proceeding")
+                return True
+            if page.locator('label.form-label:has-text("Appointment Date")').first.count() > 0:
+                logger.info("✅ Slots page visible after captcha attempt — proceeding")
+                return True
             return False
 
         self.captcha_solver.stats["ocr_success"] += 1
         if self._is_go_home_page(page):
             self._navigate_back_to_home_after_captcha_failure(page)
             return False
-        if self._wait_for_captcha_clear(page):
-            return self._wait_for_post_captcha_result(page)
+            
         return self._wait_for_post_captcha_result(page)
 
     # ══════════════════════════════════════════════════════════════════════════
@@ -793,6 +749,28 @@ class SpainVisaAutomator:
         logger.info("📧 Processing email page…")
         save_screenshot(page, f"before_email_{email.replace('@','_')}")
         time.sleep(0.2)
+
+        # Give the page a bit more time to fully render the email field.
+        # On slower connections the form controls can appear slightly late,
+        # which previously caused a false "Email field not found" error.
+        deadline = time.time() + 8
+        while time.time() < deadline:
+            try:
+                # Prefer a real form control becoming visible over a blind wait.
+                if (
+                    page.locator('input[type="email"]:visible').count() > 0
+                    or page.locator('input[name*="email" i]:visible').count() > 0
+                    or page.locator('input[id*="email" i]:visible').count() > 0
+                    or page.locator('input[placeholder*="email" i]:visible').count() > 0
+                ):
+                    break
+            except Exception:
+                pass
+            try:
+                page.wait_for_load_state("domcontentloaded", timeout=1000)
+            except Exception:
+                pass
+            time.sleep(0.2)
 
         email_field = None
 
@@ -1446,36 +1424,6 @@ class SpainVisaAutomator:
             return False
         return self._wait_for_appointment_page(page)
 
-    def _handle_appointment_booking(self, page: Page, applicant: Applicant) -> bool:
-        if not self._wait_for_appointment_page(page):
-            logger.warning("Appointment page not detected")
-            return False
-        if not self._slots_available(page):
-            logger.warning("No slots available — trying again")
-            if not self._try_again_slots_loop(page):
-                logger.warning("No slots available after try again")
-                return False
-        if not self._handle_liveness_and_data_protection(page, applicant.email):
-            logger.warning("Live verification not completed")
-            return False
-        if not self._wait_for_booking_form_ready(page):
-            logger.warning("Booking form not ready")
-            return False
-        return self._start_booking_process(page)
-
-    def _wait_for_appointment_page(self, page: Page) -> bool:
-        deadline = time.time() + 2
-        while time.time() < deadline:
-            url = (page.url or "").lower()
-            if "appointment/newappointment" in url:
-                return True
-            if page.locator('h5:has-text("Book New Appointment")').first.count() > 0 and page.locator('h5:has-text("Book New Appointment")').first.is_visible():
-                return True
-            if page.locator("#div-main").first.count() > 0 and page.locator("#div-main").first.is_visible():
-                return True
-            time.sleep(0.05)
-        return False
-
     def _wait_for_visa_type_navigation(self, page: Page) -> bool:
         start_url = page.url
         deadline = time.time() + 1.6
@@ -1489,61 +1437,6 @@ class SpainVisaAutomator:
                 return True
             time.sleep(0.03)
         return "appointment/newappointment" in (page.url or "").lower()
-
-    def _slots_available(self, page: Page) -> bool:
-        try:
-            no_slots = page.locator('text="Currently, no slots are available"').first
-            if no_slots.count() > 0 and no_slots.is_visible():
-                return False
-            alert = page.locator('.alert-danger:has-text("no slots")').first
-            if alert.count() > 0 and alert.is_visible():
-                return False
-            retry_btn = page.locator('a:has-text("Try Again")').first
-            slot_inputs = page.locator(
-                "input[id*=\"slot\" i], select[id*=\"slot\" i], "
-                "input[name*=\"date\" i], select[name*=\"date\" i]"
-            )
-            for i in range(slot_inputs.count()):
-                if slot_inputs.nth(i).is_visible():
-                    return True
-            if retry_btn.count() > 0 and retry_btn.is_visible():
-                return False
-            return True
-        except Exception:
-            return True
-
-    def _try_again_slots_loop(self, page: Page) -> bool:
-        attempts = max(1, getattr(Config, "CAPTCHA_SELECTION_RETRIES", 2))
-        for _ in range(attempts):
-            if page.is_closed():
-                return False
-            if not self._click_try_again_and_handle_captcha(page):
-                return False
-            if self._slots_available(page):
-                return True
-        return False
-
-    def _click_try_again_and_handle_captcha(self, page: Page) -> bool:
-        clicked = False
-        for selector in ['a:has-text("Try Again")', 'button:has-text("Try Again")']:
-            try:
-                btn = page.locator(selector).first
-                if btn.count() > 0 and btn.is_visible():
-                    btn.click()
-                    clicked = True
-                    break
-            except Exception:
-                continue
-        if not clicked:
-            return False
-        try:
-            page.wait_for_load_state("domcontentloaded", timeout=1200)
-        except Exception:
-            pass
-        if self._is_captcha_visible(page) or "captcha" in (page.url or "").lower():
-            if not self._handle_new_appointment_captcha(page):
-                return False
-        return self._wait_for_appointment_page(page)
 
     def _handle_liveness_and_data_protection(self, page: Page, email: str) -> bool:
         try:
